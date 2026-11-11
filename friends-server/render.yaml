@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: free-sever-friends
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: ALLOWED_ORIGINS
+        value: https://free-sever.vladimir-usa001.chatgpt.site,https://free-sever.shadyrice.chatgpt.site
