@@ -24,9 +24,9 @@ test('two real WebSocket clients: invitation, roster, movement, damage, room iso
  // A status request is a processing barrier for all of C's earlier frames.
  c.send({type:'room_status',rooms:[other]});await c.next(m=>m.type==='room_status');
  assert.equal(b.inbox.some(m=>m.type==='hit'),false);
- join(d,room,'CT','d');await d.next(m=>m.type==='admission');join(c,room,'CT','full');assert.equal((await c.next(m=>m.type==='error')).code,'team_full');
+ join(d,room,'CT','d');await d.next(m=>m.type==='admission');for(let i=0;i<3;i++){const extra=await client(url);join(extra,room,'CT','extra'+i);await extra.next(m=>m.type==='admission');}join(c,room,'CT','full');assert.equal((await c.next(m=>m.type==='error')).code,'team_full');
  join(c,room,'T','c2');await c.next(m=>m.type==='admission');
- b.send({type:'leave'});const after=await a.next(m=>m.type==='roster'&&m.count===3&&!m.players.some(p=>p.id===bid));assert.equal(after.players.some(p=>p.id===bid),false);
+ b.send({type:'leave'});const after=await a.next(m=>m.type==='roster'&&m.count===6&&!m.players.some(p=>p.id===bid));assert.equal(after.players.some(p=>p.id===bid),false);
  }finally{await relay.close();}
 });
 test('unknown room, malformed input and wrong origin are rejected',async()=>{
@@ -43,9 +43,9 @@ test('shared bots fill vacant team slots, route damage and transfer authority',a
   a.send({type:'create',map:'oasis',botFill:true});const room=(await a.next(m=>m.type==='created')).room;
   const join=(p,team)=>p.send({type:'join',room,map:'oasis',mode:'dm',team});
   join(a,'CT');const solo=await a.next(m=>m.type==='roster'&&m.count===1);
-  assert.equal(solo.botCount,3);assert.equal(solo.players.length,4);assert.equal(solo.hostId,aid);assert.equal(solo.ready,true);
+  assert.equal(solo.botCount,9);assert.equal(solo.players.length,10);assert.equal(solo.hostId,aid);assert.equal(solo.ready,true);
   join(b,'T');const duo=await a.next(m=>m.type==='roster'&&m.count===2);
-  assert.equal(duo.botCount,2);assert.equal(duo.players.filter(p=>p.team==='CT').length,2);
+  assert.equal(duo.botCount,8);assert.equal(duo.players.filter(p=>p.team==='CT').length,5);
   const bot=duo.players.find(p=>p.bot&&p.team==='CT');
   a.send({type:'state',state:{alive:true,health:100}});await b.next(m=>m.type==='state'&&m.id===aid);
   b.send({type:'state',state:{alive:true,health:100}});await a.next(m=>m.type==='state'&&m.id===bid);
@@ -58,9 +58,9 @@ test('shared bots fill vacant team slots, route damage and transfer authority',a
   b.send({type:'bot_state',epoch:duo.epoch,bots:[{id:bot.id,state:{x:999,alive:true,health:100}}]});
   b.send({type:'room_status',rooms:[room]});await b.next(m=>m.type==='room_status');
   assert.equal(a.inbox.some(m=>m.type==='state'&&m.id===bot.id),false);
-  join(c,'CT');const trio=await a.next(m=>m.type==='roster'&&m.count===3);assert.equal(trio.botCount,1);
-  join(d,'T');const full=await a.next(m=>m.type==='roster'&&m.count===4);assert.equal(full.botCount,0);assert.equal(full.players.length,4);
-  a.send({type:'leave'});const migrated=await b.next(m=>m.type==='roster'&&m.count===3&&m.hostId===bid);
+  join(c,'CT');const trio=await a.next(m=>m.type==='roster'&&m.count===3);assert.equal(trio.botCount,7);
+  join(d,'T');await d.next(m=>m.type==='admission');for(let i=0;i<6;i++){const extra=await client(url);join(extra,i%2===0?'CT':'T');await extra.next(m=>m.type==='admission');}const full=await a.next(m=>m.type==='roster'&&m.count===10);assert.equal(full.botCount,0);assert.equal(full.players.length,10);const overflow=await client(url);join(overflow,'CT');assert.equal((await overflow.next(m=>m.type==='error')).code,'room_full');
+  a.send({type:'leave'});const migrated=await b.next(m=>m.type==='roster'&&m.count===9&&m.hostId===bid);
   assert.equal(migrated.botCount,1);assert.ok(migrated.epoch>duo.epoch);
   const fresh=migrated.players.find(p=>p.bot);
   b.send({type:'bot_state',epoch:migrated.epoch,bots:[{id:fresh.id,state:{alive:true,health:100,x:42}}]});

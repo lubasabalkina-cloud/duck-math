@@ -200,8 +200,8 @@
       mode: matchContext.mode || 'defusal',
       players: 0,
       teamCounts: { CT: 0, T: 0 },
-      roomLimit: 4,
-      teamLimit: 2,
+      roomLimit: 10,
+      teamLimit: 5,
       ready: false,
     };
   }

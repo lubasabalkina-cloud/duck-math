@@ -16,15 +16,15 @@ export function createRelay({origins=['https://free-sever.vladimir-usa001.chatgp
   r.bots||=new Map();
   const keep=new Set();
   if(r.botFill&&humans.length)for(const team of ['CT','T']){
-   const count=2-humans.filter(p=>p.team===team).length;
+   const count=5-humans.filter(p=>p.team===team).length;
    for(let i=0;i<count;i++){const id='bot:'+team+':'+i;keep.add(id);if(!r.bots.has(id))r.bots.set(id,{id,name:'BOT '+team+' '+(i+1),team,map:r.map,mode:'dm',bot:true,state:null});}
   }
   for(const id of r.bots.keys())if(!keep.has(id))r.bots.delete(id);
  };
- const summary=r=>{syncBots(r);const p=members(r), teamCounts={CT:p.filter(c=>c.team==='CT').length,T:p.filter(c=>c.team==='T').length};return {room:r.code,map:r.map,mode:r.mode,botFill:!!r.botFill,botCount:r.bots.size,hostId:r.hostId,epoch:r.epoch,players:p.length,teamCounts,roomLimit:4,teamLimit:2,ready:r.botFill?p.length>0:teamCounts.CT>0&&teamCounts.T>0};};
+ const summary=r=>{syncBots(r);const p=members(r), teamCounts={CT:p.filter(c=>c.team==='CT').length,T:p.filter(c=>c.team==='T').length};return {room:r.code,map:r.map,mode:r.mode,botFill:!!r.botFill,botCount:r.bots.size,hostId:r.hostId,epoch:r.epoch,players:p.length,teamCounts,roomLimit:10,teamLimit:5,ready:r.botFill?p.length>0:teamCounts.CT>0&&teamCounts.T>0};};
  const publicPlayer=c=>({id:c.id,name:c.name,team:c.team,map:rooms.get(c.room)?.map,mode:'dm',state:c.state});
  const broadcast=(r,m,except)=>{for(const c of members(r))if(c!==except)send(c,m);};
- const roster=r=>broadcast(r,{type:'roster',...summary(r),count:members(r).length,limit:4,players:[...members(r).map(publicPlayer),...r.bots.values()]});
+ const roster=r=>broadcast(r,{type:'roster',...summary(r),count:members(r).length,limit:10,players:[...members(r).map(publicPlayer),...r.bots.values()]});
  const leave=c=>{const r=rooms.get(c.room);c.room='';c.state=null;if(r){r.touched=Date.now();roster(r);}};
  const clean=s=>String(s||'').replace(/[<>&\u0000-\u001f\u007f]/g,'').trim().slice(0,24)||'Player';
  const finite=(v,min,max)=>Number.isFinite(v)?Math.min(max,Math.max(min,v)):0;
@@ -37,7 +37,7 @@ export function createRelay({origins=['https://free-sever.vladimir-usa001.chatgp
    for(const k of ['kills','deaths','assists','hsKills','dmgDealt'])v[k]=Math.round(finite(s[k],0,99999));
    for(const k of ['alive','onGround','crouch'])v[k]=s[k]===true;
    v.weapon=/^[a-z0-9_]{1,24}$/.test(s.weapon)?s.weapon:'knife';v.money=finite(s.money,0,16000);
-   v.assistsFor=Array.isArray(s.assistsFor)?s.assistsFor.filter(id=>members(r).some(p=>p.id===id)).slice(0,4):[];
+   v.assistsFor=Array.isArray(s.assistsFor)?s.assistsFor.filter(id=>members(r).some(p=>p.id===id)).slice(0,10):[];
 return v;}
  function handle(c,m){
   if(!m||typeof m!=='object')return;
@@ -50,7 +50,7 @@ return v;}
   }
   if(m.type==='room_status'){
    const codes=Array.isArray(m.rooms)?m.rooms.slice(0,8):[];
-   send(c,{type:'room_status',rooms:codes.map(code=>rooms.has(code)?summary(rooms.get(code)):{room:code,exists:false,players:0,teamCounts:{CT:0,T:0},roomLimit:4,teamLimit:2,ready:false})});return;
+   send(c,{type:'room_status',rooms:codes.map(code=>rooms.has(code)?summary(rooms.get(code)):{room:code,exists:false,players:0,teamCounts:{CT:0,T:0},roomLimit:10,teamLimit:5,ready:false})});return;
   }
   if(m.type==='leave'){leave(c);return;}
   if(m.type==='join'){
@@ -58,12 +58,12 @@ return v;}
    if(m.map!==r.map||m.mode!==r.mode)return error(c,m,'wrong_match','Карта или режим не совпадает с комнатой.');
    if(!['CT','T'].includes(m.team))return error(c,m,'team','Выберите команду.');
    const others=members(r).filter(p=>p!==c);
-   if(others.length>=4)return error(c,m,'room_full','Комната заполнена.');
-   if(others.filter(p=>p.team===m.team).length>=2)return error(c,m,'team_full','В команде уже два игрока.');
+   if(others.length>=10)return error(c,m,'room_full','Комната заполнена.');
+   if(others.filter(p=>p.team===m.team).length>=5)return error(c,m,'team_full','В команде уже пять игроков.');
    if(c.room!==r.code)leave(c);
    c.room=r.code;c.team=m.team;c.name=clean(m.name);r.touched=Date.now();
    send(c,{type:'admission',requestId:m.requestId,id:c.id,...summary(r)});
-   send(c,{type:'welcome',id:c.id,limit:4,...summary(r)});roster(r);return;
+   send(c,{type:'welcome',id:c.id,limit:10,...summary(r)});roster(r);return;
   }
   const r=rooms.get(c.room);if(!r)return;
   if(m.type==='state'&&m.state&&typeof m.state==='object'){
@@ -73,7 +73,7 @@ return v;}
   if(m.type==='bot_state'){
    if(c.id!==r.hostId||m.epoch!==r.epoch||!Array.isArray(m.bots))return;
    if(Date.now()-(c.botAt||0)<50)return;c.botAt=Date.now();
-   for(const item of m.bots.slice(0,4)){const bot=r.bots.get(item.id);if(!bot||!item.state)continue;bot.state=sanitizeState(item.state,r);broadcast(r,{type:'state',...bot},c);}return;
+   for(const item of m.bots.slice(0,10)){const bot=r.bots.get(item.id);if(!bot||!item.state)continue;bot.state=sanitizeState(item.state,r);broadcast(r,{type:'state',...bot},c);}return;
   }
   if(m.type==='bot_shot'){
    const bot=r.bots.get(m.botId);
