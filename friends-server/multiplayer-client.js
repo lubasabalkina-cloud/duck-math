@@ -187,6 +187,7 @@
   }
 
   function clearMatchContext() {
+    clearLocalBots();botEntries=[];botHostId='';botRoom='';
     send({type:'leave'});
     players.clear(); releaseAll();
     setMatchContext(null);
@@ -246,7 +247,7 @@
 
   function isRoomReady(room) {
     const status = getRoomStatus(room);
-    return status.teamCounts.CT > 0 && status.teamCounts.T > 0;
+    return status.ready===true;
   }
 
   function canJoinTeam(team, room) {
@@ -643,7 +644,35 @@
       && a.alive === b.alive && a.onGround === b.onGround && a.crouch === b.crouch;
   }
 
+  let botHostId='',botEpoch=0,botEntries=[],botRoom='';
+  const localBots=new Map();
+  function clearLocalBots(){
+    for(const bot of localBots.values())if(game?.botMgr)window.FreeSeverBots?.remove(game,bot);
+    localBots.clear();
+  }
+  function reconcileBots(){
+    if(!game||!window.FreeSeverBots)return;
+    const active=matchContext.kind==='multiplayer'&&socketState.connected&&botRoom===matchContext.room;
+    const host=active&&botHostId===socketState.selfId;
+    if(!host){clearLocalBots();return;}
+    if(game.state!=='playing')return;
+    window.FreeSeverBots.install(game,window.ClutcherMultiplayer);
+    let changed=false;const keep=new Set(botEntries.map(b=>b.id));
+    for(const [id,bot] of localBots)if(!keep.has(id)||!game.botMgr.bots.includes(bot)){window.FreeSeverBots.remove(game,bot);localBots.delete(id);changed=true;}
+    for(const entry of botEntries){
+      releasePlayer(entry.id);
+      if(!localBots.has(entry.id)){localBots.set(entry.id,window.FreeSeverBots.create(game,entry));changed=true;}
+    }
+    if(changed)game.hud?.buildAvatars?.();
+  }
+  function publishBots(){
+    reconcileBots();
+    if(!localBots.size||game.state!=='playing')return;
+    const bots=[...localBots].map(([id,b])=>({id,state:{x:b.x,y:b.y,z:b.z,vx:b.vx||0,vy:b.vy||0,vz:b.vz||0,yaw:b.yaw||0,pitch:b._lookPitch||0,health:b.health,armor:b.armor,alive:b.alive,onGround:b.onGround,crouch:b.crouchT>0,weapon:b.weapon,kills:b.kills,deaths:b.deaths,assists:b.assists,hsKills:b._hsKills,dmgDealt:b._dmgDealt,money:b.money}}));
+    send({type:'bot_state',epoch:botEpoch,bots});
+  }
   function bindPlayer(player) {
+    if(player.bot&&botHostId===socketState.selfId)return;
     if (!game || !game.botMgr) return;
     const source = player.state || holdingState();
     const team = player.team === 'T' ? 'T' : 'CT';
@@ -966,6 +995,7 @@
         ? `connected · ${message.room} · 1 player`
         : 'connected · choose a team to join', 'ok');
     } else if (message.type === 'roster') {
+      botHostId=message.hostId||'';botEpoch=message.epoch||0;botRoom=message.room||'';botEntries=(message.players||[]).filter(p=>p.bot);reconcileBots();
       const roster = message.players || [];
       lastJoinKey = pendingJoinKey || lastJoinKey;
       pendingJoinKey = '';
@@ -993,6 +1023,9 @@
           game.player.assists = (game.player.assists || 0) + 1;
         }
       }
+    } else if (message.type === 'bot_damage') {
+      const bot=localBots.get(message.targetId);
+      if(bot&&botHostId===socketState.selfId&&message.epoch===botEpoch)window.FreeSeverBots?.damage(game,bot,message);
     } else if (message.type === 'hit') {
       handleHit(message);
     } else if (message.type === 'shot') {
@@ -1065,6 +1098,7 @@
         pendingJoinKey = '';
         players.clear();
         releaseAll();
+        clearLocalBots();botHostId='';botEntries=[];
         for (const pending of pendingAdmissions.values()) {
           if (pending.timer) clearTimeout(pending.timer);
           pending.reject(new Error('Multiplayer relay disconnected.'));
@@ -1103,7 +1137,7 @@
     const now = performance.now();
     if (socketState.connected && now - lastStateSent >= STATE_PUBLISH_INTERVAL_MS) {
       const message = playerState();
-      if (message) send(message);
+      if (message) {send(message);publishBots();}
       lastStateSent = now;
     }
   }
@@ -1131,6 +1165,7 @@
   });
   window.ClutcherMultiplayer = {
     endpoint,
+    get botEpoch(){return botEpoch;},
     get connected() { return socketState.connected; },
     get players() { return [...players.values()]; },
     get remoteBots() { return [...bound.values()]; },

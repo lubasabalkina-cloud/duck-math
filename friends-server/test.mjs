@@ -35,3 +35,35 @@ test('unknown room, malformed input and wrong origin are rejected',async()=>{
  await new Promise((resolve,reject)=>{const ws=new WebSocket(url,{origin:'https://unrelated.example'});ws.on('open',()=>{ws.terminate();reject(Error('Bad origin accepted'));});ws.on('error',e=>{assert.match(e.message,/403/);resolve();});});
  }finally{await relay.close();}
 });
+test('shared bots fill vacant team slots, route damage and transfer authority',async()=>{
+ const relay=createRelay();await new Promise(r=>relay.http.listen(0,'127.0.0.1',r));const url=`ws://127.0.0.1:${relay.http.address().port}/ws`;
+ try{
+  const a=await client(url),b=await client(url),c=await client(url),d=await client(url);
+  const aid=(await a.next(m=>m.type==='hello')).id,bid=(await b.next(m=>m.type==='hello')).id;
+  a.send({type:'create',map:'oasis',botFill:true});const room=(await a.next(m=>m.type==='created')).room;
+  const join=(p,team)=>p.send({type:'join',room,map:'oasis',mode:'dm',team});
+  join(a,'CT');const solo=await a.next(m=>m.type==='roster'&&m.count===1);
+  assert.equal(solo.botCount,3);assert.equal(solo.players.length,4);assert.equal(solo.hostId,aid);assert.equal(solo.ready,true);
+  join(b,'T');const duo=await a.next(m=>m.type==='roster'&&m.count===2);
+  assert.equal(duo.botCount,2);assert.equal(duo.players.filter(p=>p.team==='CT').length,2);
+  const bot=duo.players.find(p=>p.bot&&p.team==='CT');
+  a.send({type:'state',state:{alive:true,health:100}});await b.next(m=>m.type==='state'&&m.id===aid);
+  b.send({type:'state',state:{alive:true,health:100}});await a.next(m=>m.type==='state'&&m.id===bid);
+  a.send({type:'bot_state',epoch:duo.epoch,bots:[{id:bot.id,state:{x:10,alive:true,health:100,weapon:'ak47'}}]});
+  const snap=await b.next(m=>m.type==='state'&&m.id===bot.id);assert.equal(snap.state.x,10);
+  b.send({type:'hit',targetId:bot.id,damage:25,weapon:'ak47'});
+  assert.equal((await a.next(m=>m.type==='bot_damage')).fromId,bid);
+  a.send({type:'bot_hit',epoch:duo.epoch,botId:bot.id,targetId:bid,damage:20});
+  assert.equal((await b.next(m=>m.type==='hit'&&m.fromId===bot.id)).damage,20);
+  b.send({type:'bot_state',epoch:duo.epoch,bots:[{id:bot.id,state:{x:999,alive:true,health:100}}]});
+  b.send({type:'room_status',rooms:[room]});await b.next(m=>m.type==='room_status');
+  assert.equal(a.inbox.some(m=>m.type==='state'&&m.id===bot.id),false);
+  join(c,'CT');const trio=await a.next(m=>m.type==='roster'&&m.count===3);assert.equal(trio.botCount,1);
+  join(d,'T');const full=await a.next(m=>m.type==='roster'&&m.count===4);assert.equal(full.botCount,0);assert.equal(full.players.length,4);
+  a.send({type:'leave'});const migrated=await b.next(m=>m.type==='roster'&&m.count===3&&m.hostId===bid);
+  assert.equal(migrated.botCount,1);assert.ok(migrated.epoch>duo.epoch);
+  const fresh=migrated.players.find(p=>p.bot);
+  b.send({type:'bot_state',epoch:migrated.epoch,bots:[{id:fresh.id,state:{alive:true,health:100,x:42}}]});
+  assert.equal((await c.next(m=>m.type==='state'&&m.id===fresh.id)).state.x,42);
+ }finally{await relay.close();}
+});

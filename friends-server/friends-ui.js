@@ -1,14 +1,14 @@
 export function installFriendsUI(game,endpoint,clientScript,options={}) {
  if(!/^wss:\/\//.test(endpoint))throw Error('Нужен опубликованный сервер WSS.');
  const panel=document.createElement('dialog');
- panel.innerHTML='<form method="dialog"><button aria-label="Закрыть" style="float:right">×</button></form><h2>Играть с друзьями</h2><p>Командный бой: до четырёх игроков, по двое в команде.</p><label>Карта <select><option value="oasis">Oasis</option><option value="dusker">Dune</option></select></label><p><button data-create>Создать комнату</button></p><label>Код комнаты <input maxlength="8" autocomplete="off" spellcheck="false"></label><button data-join>Найти комнату</button><section hidden data-room><p>Код для друга: <strong data-code></strong></p><button data-copy>Скопировать код</button><button data-enter>Войти в матч</button><p>Выберите разные команды, чтобы играть друг против друга.</p></section><p role="status" aria-live="polite"></p>';
+ panel.innerHTML='<form method="dialog"><button aria-label="Закрыть" style="float:right">×</button></form><h2>Играть с друзьями</h2><p>Командный бой: до четырёх игроков, по двое в команде.</p><label>Карта <select><option value="oasis">Oasis</option><option value="dusker">Dune</option></select></label><p><label><input data-bots type="checkbox" checked> Заполнить свободные места ботами</label></p><p><button data-create>Создать комнату</button></p><label>Код комнаты <input maxlength="8" autocomplete="off" spellcheck="false"></label><button data-join>Найти комнату</button><section hidden data-room><p>Код для друга: <strong data-code></strong></p><button data-copy>Скопировать код</button><button data-enter>Войти в матч</button><p>Выберите разные команды, чтобы играть друг против друга.</p></section><p role="status" aria-live="polite"></p>';
  panel.style.cssText='background:#171d29;color:white;border:1px solid #f88d32;border-radius:16px;padding:24px;max-width:90vw;max-height:90dvh;overflow:auto;font:16px/1.5 system-ui';
  document.body.append(panel);
  const launch=document.createElement('button');launch.textContent='С друзьями';launch.onclick=()=>{document.exitPointerLock?.();if(!panel.open)panel.showModal();};
  (document.querySelector('#free-sever-controls')||document.body).append(launch);
- const status=panel.querySelector('[role=status]'),input=panel.querySelector('input');
+ const status=panel.querySelector('[role=status]'),input=panel.querySelector('input[maxlength]');
  let busy=false,loaded,selectedRoom;
- function showRoom(r){selectedRoom=r;input.value=r.room;panel.querySelector("[data-room]").hidden=false;panel.querySelector("[data-code]").textContent=r.room;status.textContent="Комната готова · игроков: "+r.players+"/4";}
+ function showRoom(r){selectedRoom=r;input.value=r.room;panel.querySelector("[data-room]").hidden=false;panel.querySelector("[data-code]").textContent=r.room;status.textContent="Комната готова · игроков: "+r.players+"/4"+(r.botFill?" · свободные места займут боты":" · только друзья");}
  const request=message=>new Promise((resolve,reject)=>{
   let settled=false;const ws=new WebSocket(endpoint),timer=setTimeout(()=>{ws.close();reject(Error('Сервер не ответил. Попробуйте через минуту.'));},70000);
   const done=(value,error)=>{if(settled)return;settled=true;clearTimeout(timer);ws.close();error?reject(error):resolve(value);};
@@ -37,7 +37,7 @@ export function installFriendsUI(game,endpoint,clientScript,options={}) {
   panel.close();await loading;
  }
  async function run(fn){if(busy)return;busy=true;status.textContent='Подключение…';try{await fn();}catch(e){status.textContent=e.message;if(!panel.open)panel.showModal();}finally{busy=false;}}
- panel.querySelector('[data-create]').onclick=()=>run(async()=>showRoom(await request({type:'create',map:panel.querySelector('select').value})));
+ panel.querySelector('[data-create]').onclick=()=>run(async()=>showRoom(await request({type:'create',map:panel.querySelector('select').value,botFill:panel.querySelector('[data-bots]').checked})));
  panel.querySelector('[data-join]').onclick=()=>run(async()=>{const code=input.value.trim().toLowerCase();if(!/^[a-z0-9_-]{8}$/.test(code))throw Error('Введите код из восьми символов.');showRoom(await request({type:'room_status',rooms:[code]}));});
  panel.querySelector('[data-copy]').onclick=async()=>{if(!selectedRoom)return;try{await navigator.clipboard.writeText(selectedRoom.room);status.textContent='Код скопирован — отправь его другу.';}catch{input.focus();input.select();status.textContent='Скопируйте выделенный код.';}};
  panel.querySelector('[data-enter]').onclick=()=>run(async()=>{if(selectedRoom)await enter(await request({type:'room_status',rooms:[selectedRoom.room]}));});
