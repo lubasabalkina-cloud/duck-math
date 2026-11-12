@@ -1,3 +1,4 @@
+import {Defusal} from './defusal.mjs';
 import {createServer} from 'node:http';
 import {randomBytes,randomUUID} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
@@ -17,12 +18,12 @@ export function createRelay({origins=['https://free-sever.vladimir-usa001.chatgp
   const keep=new Set();
   if(r.botFill&&humans.length)for(const team of ['CT','T']){
    const count=5-humans.filter(p=>p.team===team).length;
-   for(let i=0;i<count;i++){const id='bot:'+team+':'+i;keep.add(id);if(!r.bots.has(id))r.bots.set(id,{id,name:'BOT '+team+' '+(i+1),team,map:r.map,mode:'dm',bot:true,state:null});}
+   for(let i=0;i<count;i++){const id='bot:'+team+':'+i;keep.add(id);if(!r.bots.has(id))r.bots.set(id,{id,name:'BOT '+team+' '+(i+1),team,map:r.map,mode:r.mode,bot:true,state:null});}
   }
   for(const id of r.bots.keys())if(!keep.has(id))r.bots.delete(id);
  };
  const summary=r=>{syncBots(r);const p=members(r), teamCounts={CT:p.filter(c=>c.team==='CT').length,T:p.filter(c=>c.team==='T').length};return {room:r.code,map:r.map,mode:r.mode,botFill:!!r.botFill,botCount:r.bots.size,hostId:r.hostId,epoch:r.epoch,players:p.length,teamCounts,roomLimit:10,teamLimit:5,ready:r.botFill?p.length>0:teamCounts.CT>0&&teamCounts.T>0};};
- const publicPlayer=c=>({id:c.id,name:c.name,team:c.team,map:rooms.get(c.room)?.map,mode:'dm',state:c.state});
+ const publicPlayer=c=>({id:c.id,name:c.name,team:c.team,map:rooms.get(c.room)?.map,mode:rooms.get(c.room)?.mode,state:c.state});
  const broadcast=(r,m,except)=>{for(const c of members(r))if(c!==except)send(c,m);};
  const roster=r=>broadcast(r,{type:'roster',...summary(r),count:members(r).length,limit:10,players:[...members(r).map(publicPlayer),...r.bots.values()]});
  const leave=c=>{const r=rooms.get(c.room);c.room='';c.state=null;if(r){r.touched=Date.now();roster(r);}};
@@ -38,14 +39,14 @@ export function createRelay({origins=['https://free-sever.vladimir-usa001.chatgp
    for(const k of ['alive','onGround','crouch'])v[k]=s[k]===true;
    v.weapon=/^[a-z0-9_]{1,24}$/.test(s.weapon)?s.weapon:'knife';v.money=finite(s.money,0,16000);
    v.assistsFor=Array.isArray(s.assistsFor)?s.assistsFor.filter(id=>members(r).some(p=>p.id===id)).slice(0,10):[];
-return v;}
+v.round=Number.isInteger(s.round)?s.round:0;v.use=s.use===true;v.kit=s.kit===true;return v;}
  function handle(c,m){
   if(!m||typeof m!=='object')return;
   if(m.type==='create'){
    if(Date.now()-c.createdAt<2000)return error(c,m,'rate_limit','Подождите перед созданием следующей комнаты.');
    if(rooms.size>=128)return error(c,m,'capacity','Сервер заполнен.');
    const code=randomBytes(6).toString('base64url').toLowerCase();
-   const r={code,map:m.map==='dusker'?'dusker':'oasis',mode:'dm',botFill:m.botFill===true,bots:new Map(),hostId:'',epoch:0,touched:Date.now()};rooms.set(code,r);c.createdAt=Date.now();
+   const r={code,map:m.map==='dusker'?'dusker':'oasis',mode:m.mode==='defusal'?'defusal':'dm',botFill:m.botFill===true,bots:new Map(),hostId:'',epoch:0,touched:Date.now()};if(r.mode==='defusal')r.defusal=new Defusal();rooms.set(code,r);c.createdAt=Date.now();
    send(c,{type:'created',requestId:m.requestId,...summary(r)});return;
   }
   if(m.type==='room_status'){
@@ -66,14 +67,17 @@ return v;}
    send(c,{type:'welcome',id:c.id,limit:10,...summary(r)});roster(r);return;
   }
   const r=rooms.get(c.room);if(!r)return;
+  if(m.type==='bomb_config'&&c.id===r.hostId){r.defusal?.configure(m.sites);return;}
+  if(m.type==='bomb_drop'){r.defusal?.drop(c.id);return;}
+  if(r.defusal&&['hit','bot_hit','shot','bot_shot'].includes(m.type)&&!['live','planted'].includes(r.defusal.phase))return;
   if(m.type==='state'&&m.state&&typeof m.state==='object'){
    if(Date.now()-c.stateAt<40)return;c.stateAt=Date.now();const v=sanitizeState(m.state,r);
-   c.state=v;broadcast(r,{type:'state',id:c.id,team:c.team,map:r.map,mode:r.mode,state:v},c);return;
+   if(r.defusal){syncRound(r);if(!r.defusal.accept(c.id,v))return;v.alive=r.defusal.people.get(c.id).alive;}c.state=v;broadcast(r,{type:'state',id:c.id,team:c.team,map:r.map,mode:r.mode,state:v},c);return;
   }
   if(m.type==='bot_state'){
    if(c.id!==r.hostId||m.epoch!==r.epoch||!Array.isArray(m.bots))return;
    if(Date.now()-(c.botAt||0)<50)return;c.botAt=Date.now();
-   for(const item of m.bots.slice(0,10)){const bot=r.bots.get(item.id);if(!bot||!item.state)continue;bot.state=sanitizeState(item.state,r);broadcast(r,{type:'state',...bot},c);}return;
+   for(const item of m.bots.slice(0,10)){const bot=r.bots.get(item.id);if(!bot||!item.state)continue;const v=sanitizeState(item.state,r);if(r.defusal){syncRound(r);if(!r.defusal.accept(bot.id,v))continue;v.alive=r.defusal.people.get(bot.id).alive;}bot.state=v;broadcast(r,{type:'state',...bot},c);}return;
   }
   if(m.type==='bot_shot'){
    const bot=r.bots.get(m.botId);
@@ -116,11 +120,13 @@ return v;}
   ws.on('message',raw=>{if(Date.now()-c.windowAt>1000){c.windowAt=Date.now();c.count=0;}if(++c.count>80){ws.close(1008,'Rate limit');return;}try{handle(c,JSON.parse(raw));}catch{send(c,{type:'error',code:'invalid',message:'Invalid message'});}});
   ws.on('error',()=>{});ws.on('close',()=>{leave(c);clients.delete(c.id);});
  });
+ function syncRound(r){r.defusal.sync([...members(r),...r.bots.values()]);}
+ const rounds=setInterval(()=>{for(const r of rooms.values())if(r.defusal&&members(r).length){syncBots(r);syncRound(r);const p=members(r),ready=r.botFill||p.some(p=>p.team==='CT')&&p.some(p=>p.team==='T');r.defusal.tick(.1,ready);broadcast(r,{type:'round',room:r.code,...r.defusal.snapshot()});}},100);rounds.unref();
  const timer=setInterval(()=>{
   for(const c of clients.values()){if(!c.alive){c.ws.terminate();continue;}c.alive=false;c.ws.ping();}
   for(const [code,r] of rooms)if(!members(r).length&&Date.now()-r.touched>300000)rooms.delete(code);
  },30000);timer.unref();
- return {http,close:async()=>{clearInterval(timer);for(const c of clients.values())c.ws.terminate();await new Promise(resolve=>wss.close(resolve));await new Promise(resolve=>http.close(resolve));}};
+ return {http,close:async()=>{clearInterval(timer);clearInterval(rounds);for(const c of clients.values())c.ws.terminate();await new Promise(resolve=>wss.close(resolve));await new Promise(resolve=>http.close(resolve));}};
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
  const app=createRelay({origins:(process.env.ALLOWED_ORIGINS||'https://free-sever.vladimir-usa001.chatgpt.site,https://free-sever.shadyrice.chatgpt.site').split(',')});

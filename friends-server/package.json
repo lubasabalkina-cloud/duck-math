@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test test.mjs client-test.mjs"
+    "test": "node --test test.mjs client-test.mjs defusal-test.mjs engine-test.mjs"
   },
   "dependencies": {
     "ws": "8.22.2"

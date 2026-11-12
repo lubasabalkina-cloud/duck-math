@@ -1,10 +1,12 @@
 // Appended inside the game's ESM scope: reuses original AI, models and damage.
+function mpRoundPerson(id){return window.ClutcherMultiplayer?.roundState?.people?.find(p=>p.id===id);}
 window.FreeSeverBots = {
  create(game,entry){
   const bot=new $h(game,entry.team,entry.name,1);
-  bot._friendsBotId=entry.id;
+  bot._friendsBotId=entry.id;bot.money=800;
   game.botMgr.bots.push(bot);bot.spawn();
   if(entry.state){const s=entry.state;for(const k of ['x','y','z','vx','vy','vz','yaw','pitch','health','armor','alive','onGround','weapon','kills','deaths','assists'])if(s[k]!==undefined)bot[k]=s[k];if(!bot.alive)bot.respawnT=3.5;}
+  if(game.mode==='defusal'&&game.modeCtl?._networkRound){const p=mpRoundPerson(entry.id);if(p&&!p.alive){bot.alive=false;bot.health=0;}}
   return bot;
  },
  remove(game,bot){
@@ -18,6 +20,7 @@ window.FreeSeverBots = {
   if(game._friendsBotHooks)return;game._friendsBotHooks=true;
   const damage=game.dealDamage;
   game.dealDamage=function(target,amount,attacker,head,weapon,region,...rest){
+   if(mp.multiplayerActive&&this.mode==='defusal'&&!['live','planted'].includes(this.modeCtl?.state))return;
    if(mp.multiplayerActive&&attacker?._friendsBotId&&target.isNetworkPlayer){
     mp.send({type:'bot_hit',epoch:mp.botEpoch,botId:attacker._friendsBotId,targetId:target._networkPlayerId,damage:amount,region:head?'head':region,weapon:attacker.weapon});return;
    }

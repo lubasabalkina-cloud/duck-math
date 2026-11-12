@@ -187,7 +187,7 @@
   }
 
   function clearMatchContext() {
-    clearLocalBots();botEntries=[];botHostId='';botRoom='';
+    clearLocalBots();botEntries=[];botHostId='';botRoom='';roundState=null;
     send({type:'leave'});
     players.clear(); releaseAll();
     setMatchContext(null);
@@ -415,6 +415,7 @@
     return {
       type: 'state', map: match.map, mode: match.mode, team: match.team,
       state: {
+        round:game.modeCtl?._networkRound||0,use:game.modeCtl?._netUse===true,kit:game.modeCtl?.playerKit===true,
         x: player.x, y: player.y, z: player.z,
         vx: player.vx || 0, vy: player.vy || 0, vz: player.vz || 0,
         yaw: player.yaw || 0, pitch: player.pitch || 0,
@@ -644,7 +645,7 @@
       && a.alive === b.alive && a.onGround === b.onGround && a.crouch === b.crouch;
   }
 
-  let botHostId='',botEpoch=0,botEntries=[],botRoom='';
+  let botHostId='',botEpoch=0,botEntries=[],botRoom='',roundState=null;
   const localBots=new Map();
   function clearLocalBots(){
     for(const bot of localBots.values())if(game?.botMgr)window.FreeSeverBots?.remove(game,bot);
@@ -668,7 +669,7 @@
   function publishBots(){
     reconcileBots();
     if(!localBots.size||game.state!=='playing')return;
-    const bots=[...localBots].map(([id,b])=>({id,state:{x:b.x,y:b.y,z:b.z,vx:b.vx||0,vy:b.vy||0,vz:b.vz||0,yaw:b.yaw||0,pitch:b._lookPitch||0,health:b.health,armor:b.armor,alive:b.alive,onGround:b.onGround,crouch:b.crouchT>0,weapon:b.weapon,kills:b.kills,deaths:b.deaths,assists:b.assists,hsKills:b._hsKills,dmgDealt:b._dmgDealt,money:b.money}}));
+    const bots=[...localBots].map(([id,b])=>({id,state:{round:game.modeCtl?._networkRound||0,use:!b.target,kit:b.hasKit===true,x:b.x,y:b.y,z:b.z,vx:b.vx||0,vy:b.vy||0,vz:b.vz||0,yaw:b.yaw||0,pitch:b._lookPitch||0,health:b.health,armor:b.armor,alive:b.alive,onGround:b.onGround,crouch:b.crouchT>0,weapon:b.weapon,kills:b.kills,deaths:b.deaths,assists:b.assists,hsKills:b._hsKills,dmgDealt:b._dmgDealt,money:b.money}}));
     send({type:'bot_state',epoch:botEpoch,bots});
   }
   function bindPlayer(player) {
@@ -948,6 +949,7 @@
 
   function handleMessage(message) {
     if (!message || typeof message.type !== 'string') return;
+    if(message.type==='round'){if(message.room===matchContext.room)roundState=message;return;}
     if (message.type === 'room_status') {
       for (const summary of message.rooms || []) updateRoomStatus(summary);
     } else if (message.type === 'hello') {
@@ -1166,6 +1168,9 @@
   window.ClutcherMultiplayer = {
     endpoint,
     get botEpoch(){return botEpoch;},
+    get selfId(){return socketState.selfId;},
+    get isHost(){return botHostId===socketState.selfId;},
+    get roundState(){return roundState;},
     get connected() { return socketState.connected; },
     get players() { return [...players.values()]; },
     get remoteBots() { return [...bound.values()]; },

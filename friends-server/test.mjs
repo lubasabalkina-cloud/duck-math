@@ -67,3 +67,18 @@ test('shared bots fill vacant team slots, route damage and transfer authority',a
   assert.equal((await c.next(m=>m.type==='state'&&m.id===fresh.id)).state.x,42);
  }finally{await relay.close();}
 });
+test('bomb room shares round authority, blocks freeze damage and sends one carrier to both clients',async()=>{
+ const relay=createRelay();await new Promise(r=>relay.http.listen(0,'127.0.0.1',r));const url=`ws://127.0.0.1:${relay.http.address().port}/ws`;
+ try{const a=await client(url),b=await client(url);const aid=(await a.next(m=>m.type==='hello')).id,bid=(await b.next(m=>m.type==='hello')).id;
+ a.send({type:'create',mode:'defusal',map:'oasis'});const created=await a.next(m=>m.type==='created');assert.equal(created.mode,'defusal');const room=created.room;
+ for(const [p,team] of [[a,'CT'],[b,'T']]){p.send({type:'join',room,mode:'defusal',map:'oasis',team});await p.next(m=>m.type==='admission');}
+ a.send({type:'bomb_config',sites:[{name:'A',boxes:[[0,-2,0,10,4,10]]}]});
+ for(const p of [a,b])p.send({type:'state',state:{round:0,alive:true,health:100,onGround:true,x:5,y:0,z:5}});
+ const sa=await a.next(m=>m.type==='round'&&m.round===1),sb=await b.next(m=>m.type==='round'&&m.round===1);assert.equal(sa.carrier,bid);assert.deepEqual(sa,sb);assert.equal(sa.phase,'freeze');
+ for(const p of [a,b])p.send({type:'state',state:{round:1,alive:true,health:100,onGround:true,x:5,y:0,z:5}});
+ a.send({type:'hit',targetId:bid,damage:100});a.send({type:'room_status',rooms:[room]});await a.next(m=>m.type==='room_status');assert.equal(b.inbox.some(m=>m.type==='hit'),false);
+ await new Promise(r=>setTimeout(r,60));b.send({type:'state',state:{round:1,alive:false,health:0}});await a.next(m=>m.type==='state'&&m.id===bid&&m.state.alive===false);a.inbox.splice(0,a.inbox.length);
+ await new Promise(r=>setTimeout(r,60));b.send({type:'state',state:{round:1,alive:true,health:100}});const dead=await a.next(m=>m.type==='state'&&m.id===bid);assert.equal(dead.state.alive,false);
+ assert.notEqual(aid,bid);
+ }finally{await relay.close();}
+});

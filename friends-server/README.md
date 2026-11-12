@@ -26,3 +26,15 @@ Node 22+. Build: npm ci --prefix friends-server && npm test --prefix friends-ser
 
 ## 5 на 5
 Лимиты обновлены: 10 участников, по 5 в команде. 1 человек + 9 ботов, 2 + 8, 10 + 0. Тест проверяет заполнение всех десяти мест, отклонение 11-го и восстановление бота при выходе. Ограничена общая частота косметических выстрелов ботов, чтобы 9 ботов не переполняли лимит сообщений.
+
+## Bomb defusal (version 24)
+New rooms created by the UI use `mode: defusal`. Existing DM clients remain compatible.
+The relay owns round/score/bomb transitions; a single elected browser still simulates bots.
+5v5, vacant places filled by bots, one C4, 15s freeze, 115s round, 40s bomb,
+3.2s plant, 10s defuse / 5s with kit, first to 13 wins, fixed teams (no halftime swap).
+Players joining a running round wait for the next one. Death cannot be undone by a later state packet.
+800 starting money; original weapon purchase/price/buy-zone checks are used, with 20s live buy window.
+`defusal-test.mjs` verifies the state machine; `test.mjs` exercises actual WebSockets.
+`engine-test.mjs` runs the actual shipped mode controller and purchase code when the site bundle is available (skipped on the relay-only Render checkout).
+This is a casual private-room protocol, not an anti-cheat server. A Render restart removes rooms.
+Full WebGL match verification must be performed on a browser with working WebGL.
